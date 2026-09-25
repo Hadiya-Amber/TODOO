@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint-and-test:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          if [ -f requirements.in ]; then pip install -r requirements.in; else pip install pytest; fi
+
+      - name: Run linter (ruff)
+        run: |
+          if python -c "import importlib,sys; importlib.util.find_spec('ruff') is None and sys.exit(1)"; then pip install ruff; fi || true
+          if command -v ruff >/dev/null 2>&1; then ruff check . || true; else echo "ruff not available, skipping lint"; fi
+
+      - name: Run tests
+        run: |
+          echo "Running unit and integration tests"
+          python -m pytest -q
+
+  # Placeholder job for latency-gating. This job is intentionally commented
+  # out to show where a latency-gating step can be added in the future.
+  # To enable, remove the comment markers and provide the required secrets
+  # or environment variables via the repository's Settings -> Secrets.
+  #
+  # latency-gating:
+  #   name: Latency gating (placeholder)
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #     - name: Check required latency secret
+  #       run: |
+  #         if [ -z "${{ secrets.LATENCY_API_KEY }}" ]; then
+  #           echo "Missing required secret LATENCY_API_KEY. This job requires the secret to be configured in repository settings.";
+  #           exit 1;
+  #         fi
+  #     - name: Run latency benchmark (example)
+  #       run: |
+  #         echo "Run latency benchmark here using LATENCY_API_KEY"

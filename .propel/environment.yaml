@@ -1,0 +1,13 @@
+stack: python-pytest
+install_cmd: pip install -r requirements.in
+syntax_cmd: python -c "import os, sys; S = {'node_modules', '.venv', '.propel', 'vendor',
+  '.git', '__pycache__', 'dist', 'build', '.tox', '.mypy_cache'}; P = [os.path.join(r,
+  f) for r, d, fs in os.walk('.') if not d.__setitem__(slice(None), [x for x in d
+  if x not in S]) for f in fs if f.endswith('.py')]; [compile(open(p, encoding='utf-8').read(),
+  p, 'exec') for p in P]"
+build_cmd: python -m compileall -q -x '/(node_modules|\.venv|\.propel|vendor|\.git)/'
+  .
+test_cmd: python -m pytest -q
+test_selector: python -m pytest -q {path}
+dependency_file: requirements.in
+runtime_version: '3.11'
