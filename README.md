@@ -46,8 +46,8 @@ export SECRET_KEY=mydevsecret
 To start the application locally (development):
 
 ```bash
-uvicorn todoo.main:app --reload
-# or (alternative) python -m uvicorn todoo.main:app --reload
+uvicorn app.main:app --reload --port 8000
+# or (alternative) python -m uvicorn app.main:app --reload --port 8000
 ```
 
 If the run artifact referenced by other tasks exists, follow that project's run command instead.
@@ -83,6 +83,62 @@ python -m pytest -q
 - If tests fail with import errors, ensure your virtualenv is activated and dependencies are installed.
 - If environment variables are missing, double-check they are exported or present in your .env before running the app or tests.
 - If the CI pipeline shows missing configuration or secrets, the workflow is designed to fail visibly — do not add secrets into the repository.
+
+Common local-run failures and how to diagnose them
+-------------------------------------------------
+
+- Port already in use
+
+  If uvicorn fails to bind the requested port (default 8000) you will see
+  an error message such as "Address already in use". Either stop the process
+  using the port or start the server on a different port via the `--port`
+  flag:
+
+  ```bash
+  uvicorn app.main:app --reload --port 8001
+  ```
+
+- Missing dependencies / import errors
+
+  Ensure your virtual environment is activated and dependencies are
+  installed (`pip install -r requirements.in`). If a third-party import
+  fails when running the app or tests, install the missing package into
+  your virtualenv.
+
+- Permission denied when accessing the JSON persistence store
+
+  If the server logs contain a permission denied error when reading or
+  writing the JSON store, verify the path and permissions as described in
+  persistence/README.md. A quick way to print the path the app will use is:
+
+  ```bash
+  python -c "from app.persistence import get_data_file_path; print(get_data_file_path())"
+  ```
+
+  Then inspect permissions:
+
+  ```bash
+  ls -l <path>
+  stat <path>
+  ```
+
+  If the parent directory does not exist, create it and set ownership to
+  your development user and mode 0755 (directories) / 0640 or 0644 (files):
+
+  ```bash
+  mkdir -p "$(dirname <path>)"
+  chown $(id -u):$(id -g) "$(dirname <path>)"
+  chmod 0755 "$(dirname <path>)"
+  ```
+
+  You can also create an initial empty store from the Python REPL or a one-liner:
+
+  ```bash
+  python -c "from app.persistence import save_store; save_store([])"
+  ```
+
+  See persistence/README.md for more details and recommendations about
+  permissions, ownership and durability.
 
 ## Developer checklist
 

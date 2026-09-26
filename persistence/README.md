@@ -69,6 +69,54 @@ Environment variables
 - SECRET_KEY - Application secret (used by the app; not directly persistence
   related but documented here for convenience).
 
+Verifying the runtime JSON store path and permissions
+----------------------------------------------------
+
+The authoritative source of the runtime JSON store path is the application
+code: app/persistence.py::get_data_file_path(). Use the following commands to
+verify the path your running process will use and to inspect filesystem
+permissions.
+
+- Print the resolved path from the shell:
+
+```bash
+python -c "from app.persistence import get_data_file_path; print(get_data_file_path())"
+```
+
+- Check the file and directory listing and permissions (replace <path> with
+  the printed path above):
+
+```bash
+ls -ld "$(dirname <path>)" && ls -l <path> || true
+```
+
+- Alternatively use stat for a more detailed view:
+
+```bash
+stat <path>
+```
+
+If the file does not exist yet, ls -l will report 'No such file or directory'.
+Create the parent directory and ensure it is owned by the user running the
+application (for example, your development user) and has appropriate mode bits:
+
+```bash
+mkdir -p "$(dirname <path>)"
+chown $(id -u):$(id -g) "$(dirname <path>)"
+chmod 0755 "$(dirname <path>)"
+```
+
+To create an initial empty store with safe permissions:
+
+```bash
+python -c "from app.persistence import save_store; save_store([])"
+chmod 0640 <path> || true
+```
+
+Cross-reference: see the repository README 'Local development' troubleshooting
+section for guidance on diagnosing permission denied errors when running the
+application locally.
+
 Security and operational notes
 ------------------------------
 

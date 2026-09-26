@@ -15,6 +15,17 @@ Invocation (future):
 python client_harness/run_latency_test.py --target http://localhost:8000
 ```
 
+Server runtime
+--------------
+
+When running the client harness locally you will need a running server.
+Follow the "Local development" section in the repository README to start the
+server. As a convenience, the canonical development run command is:
+
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
 CI usage:
 
 - CI can invoke the harness as part of a job that measures latency and
