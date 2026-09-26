@@ -8,17 +8,18 @@ followed by engineers implementing durable persistence and instrumentation.
 Location and path pattern
 -------------------------
 
-The runtime path for the JSON store is resolved from the environment variable
-TODOO_DATA_FILE. Example patterns:
+The runtime path for the JSON store is resolved from the environment variables
+TODOS_JSON_PATH (preferred) and TODOO_DATA_FILE (legacy). Example patterns:
 
 - Single file inside application data directory: /var/lib/todoo/todos.json
 - Per-tenant files: /var/lib/todoo/store/<tenant-id>.json
 - Local development default: ./data/todoo.json
 
-The code scaffold in app/persistence.py resolves TODOO_DATA_FILE and falls
-back to ./data/todoo.json when the variable is not set. Production deployments
-should set TODOO_DATA_FILE to a directory on the VM with appropriate
-permissions and durability characteristics.
+The code scaffold in app/persistence.py prefers TODOS_JSON_PATH, falls back to
+TODOO_DATA_FILE for backwards compatibility, and finally to ./data/todoo.json
+when neither variable is set. Production deployments should set TODOS_JSON_PATH
+to a directory on the VM with appropriate permissions and durability
+characteristics.
 
 Permissions and access
 ----------------------
@@ -64,10 +65,22 @@ jobs that invoke the harness to perform latency gating in the future.
 Environment variables
 ---------------------
 
-- TODOO_DATA_FILE - Absolute or relative path to the JSON persistence file.
-  Example: /var/lib/todoo/todos.json
+- TODOS_JSON_PATH - Preferred absolute or relative path to the JSON
+  persistence file. Example: /var/lib/todoo/todos.json
+- TODOO_DATA_FILE - Legacy variable name retained for compatibility.
 - SECRET_KEY - Application secret (used by the app; not directly persistence
   related but documented here for convenience).
+
+Runtime startup example
+----------------------
+
+Run the application with uvicorn, pointing the environment at the desired
+path. Example (single-VM):
+
+```bash
+export TODOS_JSON_PATH=/var/lib/todoo/todos.json
+uvicorn app:app --host 127.0.0.1 --port 8000
+```
 
 Verifying the runtime JSON store path and permissions
 ----------------------------------------------------
