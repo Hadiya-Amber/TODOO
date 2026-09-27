@@ -1,37 +1,32 @@
-"""Persistence scaffolding for TODOO.
+"""Persistence for TODOO: a small, well-documented JSON file store.
 
-This module documents and provides a minimal, non-invasive scaffold for the
-server-side JSON file store. It intentionally does not implement application
-storage semantics; instead it exposes a small, well-documented surface that
-future work can extend.
+This module provides a minimal, deterministic server-side JSON persistence
+implementation used by the application. It is intentionally small and focused on
+being easy to reason about in tests and in local development. The behaviour is
+sufficient for the project's acceptance tests and is written to be extended for
+production (locking, fsync policies, migration hooks) without changing the
+public surface.
 
-Design notes:
-- The runtime JSON file path is resolved from the TODOO_DATA_FILE environment
-  variable. If not set, a reasonable default inside the repository is used
-  (./data/todoo.json). Callers should not rely on the default for production
-  deployments.
-- File access is intentionally conservative: helper functions return empty
-  lists or sensible defaults rather than raising when the file is absent.
-- This module is structured so future changes can add locking, atomic
-  replace semantics, fsync guarantees, or migrate to a different backend with
-  minimal caller impact.
-
-Public helpers:
+Public API
 - get_data_file_path() -> str
-- load_store() -> list[dict]
-- save_store(items: list[dict]) -> None
+- load_store() -> Any
+- save_store(payload: Any) -> None
+- validate_data_file(cfg_path: Path) -> None
 
-Type hints are provided for clarity.
+The runtime JSON file path is resolved from the TODOS_JSON_PATH environment
+variable. If not set, a reasonable default inside the repository is used
+(./data/todoo.json). Callers should not rely on the default for production
+deployments.
 """
 from __future__ import annotations
 
 from pathlib import Path
 import json
 import os
-from typing import Any, List
+from typing import Any
 
 
-_ENV_VAR = "TODOO_DATA_FILE"
+_ENV_VAR = "TODOS_JSON_PATH"
 _DEFAULT_RELATIVE = Path("data") / "todoo.json"
 
 
@@ -48,16 +43,23 @@ def get_data_file_path() -> str:
     return str(_DEFAULT_RELATIVE.resolve())
 
 
-def load_store() -> List[dict]:
-    """Load the JSON store and return a list of items.
+def load_store() -> Any:
+    """Load and return the JSON content from the configured store path.
 
-    If the file does not exist, return an empty list. If the file contains
-    invalid JSON, raise a ValueError with context for the caller.
+    Returns the parsed JSON value as-is (commonly a dict with a top-level
+    "todos" key). If the file does not exist, return a sensible default of
+    {"todos": []} so callers can assume a dict-shaped payload.
+
+    Raises
+    ------
+    ValueError
+        If the file contains invalid JSON.
     """
     path = Path(get_data_file_path())
     if not path.exists():
-        # Absence of the file is interpreted as an empty store
-        return []
+        # Absence of the file is interpreted as an empty store with a
+        # dict-shaped payload used by the application routes.
+        return {"todos": []}
 
     try:
         with path.open("r", encoding="utf-8") as fh:
@@ -65,41 +67,75 @@ def load_store() -> List[dict]:
     except json.JSONDecodeError as exc:  # pragma: no cover - defensive
         raise ValueError(f"persistence: invalid JSON in {path}: {exc}") from exc
 
-    # Expecting a JSON array at top-level; coerce where reasonable.
-    if isinstance(data, list):
-        return data
-    # If a dict is stored, wrap it for callers that expect a list.
-    if isinstance(data, dict):
-        return [data]
-    # Unknown shape — raise so callers notice and handle migration.
-    raise ValueError(f"persistence: unexpected JSON shape in {path}; expected list or dict")
+    return data
 
 
-def save_store(items: List[dict]) -> None:
-    """Persist the provided list of dict items to the JSON store path.
+def save_store(payload: Any) -> None:
+    """Persist the provided JSON-serializable payload to the configured path.
 
-    This is a simple implementation intended only as a scaffold. It writes
-    the JSON file with UTF-8 encoding and 2-space indentation. Future work
-    should replace this with atomic write + fsync semantics for durability.
+    Writes are performed atomically by writing to a temporary file in the same
+    directory and then atomically replacing the destination. This reduces the
+    window where readers might see a partially-written file.
     """
     path = Path(get_data_file_path())
     if not path.parent.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Write the file. For now this is not atomic; callers relying on this
-    # behavior should be aware and convert to an atomic replace pattern.
-    with path.open("w", encoding="utf-8") as fh:
-        json.dump(items, fh, ensure_ascii=False, indent=2)
+    # Serialize to a temporary file in the same directory then replace.
+    temp = path.with_name(path.name + ".tmp")
+    with temp.open("w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+        fh.flush()
+        try:
+            os.fsync(fh.fileno())
+        except OSError:
+            # Not all platforms support fsync on regular files (Windows in some
+            # environments). Continue without failing; atomic replace still
+            # provides a significant safety improvement.
+            pass
+
+    # Atomic replace
+    os.replace(str(temp), str(path))
 
 
-def _example_usage() -> None:  # pragma: no cover - documentation helper
-    """Small internal example demonstrating how callers will use this module.
+def validate_data_file(cfg_path: Path) -> None:
+    """Validate that the configured data file path is usable by the process.
 
-    Not executed in tests; kept for developer reference.
+    - If the parent directory does not exist: raise RuntimeError (developer
+      must create the directory or update configuration).
+    - If the file exists but is not writable by the current process: raise
+      RuntimeError describing the problem and remediation.
+    - If the file does not exist but the parent directory exists, create an
+      empty JSON store file with a sensible default payload.
+
+    The message of the raised RuntimeError includes the configured path and
+    remediation advice so failures at process start are actionable.
     """
-    items = load_store()
-    items.append({"id": 1, "title": "example"})
-    save_store(items)
+    parent = cfg_path.parent
+    if not parent.exists():
+        raise RuntimeError(
+            f"persistence: parent directory for JSON store does not exist: {cfg_path}\n"
+            "Remediation: create the parent directory or change TODOS_JSON_PATH to a writable location."
+        )
+
+    if cfg_path.exists():
+        # File exists — ensure we can open it for appending (writability)
+        if not os.access(str(cfg_path), os.W_OK):
+            raise RuntimeError(
+                f"persistence: configured JSON store is not writable: {cfg_path}\n"
+                "Remediation: adjust file permissions or ownership so the process can write to the file."
+            )
+        # Otherwise writable — nothing to do
+        return
+
+    # File does not exist but parent exists — create an initial empty store.
+    try:
+        save_store({"todos": []})
+    except OSError as exc:
+        raise RuntimeError(
+            f"persistence: unable to create initial JSON store at {cfg_path}: {exc}\n"
+            "Remediation: ensure the parent directory is writable by the process user."
+        ) from exc
 
 
-__all__ = ["get_data_file_path", "load_store", "save_store"]
+__all__ = ["get_data_file_path", "load_store", "save_store", "validate_data_file"]
