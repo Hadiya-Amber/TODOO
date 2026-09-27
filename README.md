@@ -41,13 +41,19 @@ export TODOO_DATA_FILE=./data/todoo.json
 export SECRET_KEY=mydevsecret
 ```
 
-## One-line run command
+## Running
 
-To start the application locally (development):
+Set the JSON persistence path environment variable and start the ASGI server using uvicorn. Example:
 
 ```bash
-uvicorn app.main:app --reload --port 8000
-# or (alternative) python -m uvicorn app.main:app --reload --port 8000
+export TODOS_JSON_PATH=/var/lib/todo_store/todos.json
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+To override host/port, change the `--host` and `--port` flags, for example:
+
+```bash
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
 If the run artifact referenced by other tasks exists, follow that project's run command instead.
