@@ -75,7 +75,7 @@ Verifying the runtime JSON store path and permissions
 The authoritative source of the runtime JSON store path is the application
 code: app/persistence.py::get_data_file_path(). Use the following commands to
 verify the path your running process will use and to inspect filesystem
-permissions.
+permissions. These commands are safe to run from your development account.
 
 - Print the resolved path from the shell:
 
@@ -96,22 +96,55 @@ ls -ld "$(dirname <path>)" && ls -l <path> || true
 stat <path>
 ```
 
-If the file does not exist yet, ls -l will report 'No such file or directory'.
-Create the parent directory and ensure it is owned by the user running the
-application (for example, your development user) and has appropriate mode bits:
+Common startup errors and exact messages
+---------------------------------------
+
+When the persistence file or its parent directory is missing or unwritable,
+the application may fail during startup. The code uses validate_data_file and
+file I/O that can raise standard Python exceptions. Examples you may see in the
+server logs or traceback include:
+
+- FileNotFoundError: [Errno 2] No such file or directory: '<path>'
+- PermissionError: [Errno 13] Permission denied: '<path>'
+- RuntimeError raised by the persistence resolver with exact messages such as:
+
+  - "persistence: parent directory for JSON store does not exist: <path>\nRemediation: create the parent directory or change TODOS_JSON_PATH to a writable location."
+
+  - "persistence: configured JSON store is not writable: <path>\nRemediation: adjust file permissions or ownership so the process can write to the file."
+
+  - "persistence: unable to create initial JSON store at <path>: <os error>\nRemediation: ensure the parent directory is writable by the process user."
+
+Use the exact message text above to match log lines when troubleshooting. The authoritative resolvers are documented in code: app/persistence.py::get_data_file_path() and app/persistence.py::validate_data_file().
+
+Remediation: create the path, set ownership and safe permissions (one-liner)
 
 ```bash
-mkdir -p "$(dirname <path>)"
-chown $(id -u):$(id -g) "$(dirname <path>)"
-chmod 0755 "$(dirname <path>)"
+# Create parent directory, empty file, set ownership to current user and safe permissions
+mkdir -p "$(dirname <PATH>)" && touch "<PATH>" && chown $(id -u):$(id -g) "<PATH>" && chmod 0640 "<PATH>"
+
+# If you need group-readable or world-readable while debugging:
+chmod 0644 "<PATH>"
 ```
 
-To create an initial empty store with safe permissions:
+Recommended ownership and modes for a single-VM deployment
+-----------------------------------------------------------
+
+- Directories: 0755
+- Files: 0640 (or 0644 if other system users need read access)
+- Ownership: the application process user (for example, `todoo` or `www-data`)
+
+If you prefer to initialise the store from Python (safe and idempotent):
 
 ```bash
-python -c "from app.persistence import save_store; save_store({'todos': []})"
-chmod 0640 <path> || true
+python -c "from app.persistence import save_store; save_store([])"
 ```
+
+Cross-reference: foreground startup and uvicorn examples
+-------------------------------------------------------
+
+See the repository README's "Local runtime / VM startup" section for one-line
+uvicorn examples, environment variable usage (TODOS_JSON_PATH), and sample
+curl commands that exercise create, edit, toggle and delete flows.
 
 Example foreground startup
 --------------------------

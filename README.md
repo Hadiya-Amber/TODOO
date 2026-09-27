@@ -29,32 +29,155 @@ pip install pytest
 
 ## Required environment variables
 
-The application expects a few environment variables to be set in your shell or via a .env file. Example placeholders:
+The application expects a few environment variables to be set in your shell or via a .env file. Example placeholders (the code resolves the JSON store from TODOS_JSON_PATH - see app/persistence.py::get_data_file_path):
 
-- TODOO_DATA_FILE: Path to the JSON persistence file (e.g. ./data/todoo.json)
+- TODOS_JSON_PATH: Path to the JSON persistence file (e.g. ./data/todoo.json or /var/lib/todoo/todos.json)
 - SECRET_KEY: an application secret used for signing or sessions
 
 You can export them manually:
 
 ```bash
-export TODOO_DATA_FILE=./data/todoo.json
+export TODOS_JSON_PATH=./data/todoo.json
 export SECRET_KEY=mydevsecret
 ```
 
-## Running
+## Local runtime / VM startup
 
-Set the JSON persistence path environment variable and start the ASGI server using uvicorn. Example:
+This section shows one-line uvicorn commands, environment variables, and example HTTP requests you can run on a single VM to start the FastAPI ASGI server and exercise the /api/todos endpoints. Replace placeholders in angle brackets (e.g. <HOST>, <PORT>, <PATH>) with real values.
 
-```bash
-export TODOS_JSON_PATH=/var/lib/todo_store/todos.json
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-To override host/port, change the `--host` and `--port` flags, for example:
+One-line uvicorn examples (placeholders):
 
 ```bash
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8080
+# Start on localhost with an explicit JSON store path
+export TODOS_JSON_PATH=<PATH_TO_JSON_STORE>  # e.g. /var/lib/todoo/todos.json or ./data/todoo.json
+uvicorn app.main:app --host <HOST> --port <PORT>
+
+# Example using loopback defaults:
+export TODOS_JSON_PATH=./data/todoo.json
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+
+# Bind to all interfaces (VM-facing):
+export TODOS_JSON_PATH=/var/lib/todoo/todos.json
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+
+Notes:
+- The application resolves the JSON persistence file from TODOS_JSON_PATH. See persistence/README.md for verification and recommended permissions.
+- If your environment uses a different variable name, the authoritative resolver in the code is get_data_file_path in app/persistence.py (run: python -c "from app.persistence import get_data_file_path; print(get_data_file_path())").
+
+Quick exercise: example HTTP requests for /api/todos
+
+Below are curl examples that exercise the create, edit, toggle (partial-update), delete and list (GET) flows. They assume the server is reachable at http://<HOST>:<PORT> and the API root is /api/todos.
+
+1) Create a todo (POST)
+
+```bash
+curl -sS -X POST "http://<HOST>:<PORT>/api/todos" \
+  -H "Content-Type: application/json" \
+  -d '{"label":"Buy milk"}'
+# Expected: 201 Created with JSON body for the created todo containing an "id", "label", and "done" fields
+```
+
+2) List todos (GET)
+
+```bash
+curl -sS "http://<HOST>:<PORT>/api/todos"
+# Expected: 200 OK with JSON array containing created items
+```
+
+3) Edit a todo (PUT)
+
+```bash
+curl -sS -X PUT "http://<HOST>:<PORT>/api/todos/<ID>" \
+  -H "Content-Type: application/json" \
+  -d '{"label":"Buy almond milk"}'
+# Expected: 200 OK with updated todo in response
+```
+
+4) Toggle a todo's done state (PATCH)
+
+```bash
+curl -sS -X PATCH "http://<HOST>:<PORT>/api/todos/<ID>/toggle"
+# Expected: 200 OK with todo showing toggled "done" boolean
+```
+
+5) Delete a todo (DELETE)
+
+```bash
+curl -sS -X DELETE "http://<HOST>:<PORT>/api/todos/<ID>"
+# Expected: 204 No Content (or 200 OK) and subsequent GET should not include the item
+```
+
+Verify persistence across restart
+
+1. Start the server with a persistent path: export TODOS_JSON_PATH=./data/todoo.json; uvicorn app.main:app --host 127.0.0.1 --port 8000
+2. Create a todo using the POST example above
+3. Stop the server (Ctrl-C) and restart it with the same TODOS_JSON_PATH
+4. Run GET /api/todos — the previously created todo should still be present in the list
+
+Troubleshooting and remediation
+
+Missing or unwritable JSON file
+
+- Symptom: Server fails on startup with an exception mentioning the data file path or a traceback including PermissionError or RuntimeError from app.persistence.validate_data_file.
+- Exact messages observed from the code on startup when the file or its directory is missing or not writable (examples you may see):
+  - "FileNotFoundError: [Errno 2] No such file or directory: '<path>'"
+  - "PermissionError: [Errno 13] Permission denied: '<path>'"
+  - RuntimeError from the persistence resolver with one of these exact messages:
+
+    - "persistence: parent directory for JSON store does not exist: <path>\nRemediation: create the parent directory or change TODOS_JSON_PATH to a writable location."
+
+    - "persistence: configured JSON store is not writable: <path>\nRemediation: adjust file permissions or ownership so the process can write to the file."
+
+    - "persistence: unable to create initial JSON store at <path>: <os error>\nRemediation: ensure the parent directory is writable by the process user."
+
+Remediation steps (one-liners):
+
+```bash
+# Create parent directory and an empty store, set ownership to current user and safe permissions
+mkdir -p "$(dirname <PATH>)" && touch "<PATH>" && chown $(id -u):$(id -g) "<PATH>" && chmod 0640 "<PATH>"
+
+# If you need group-readable or world-readable while debugging:
+chmod 0644 "<PATH>"
+```
+
+After creating or fixing permissions, restart the uvicorn command.
+
+Port-in-use conflict
+
+- Symptom: uvicorn fails to bind the requested port and you see "Address already in use" or similar in the logs.
+- Detect processes listening on the port:
+
+```bash
+# Preferred: ss
+ss -ltnp | grep :<PORT>
+# or lsof
+lsof -iTCP -sTCP:LISTEN -P -n | grep :<PORT>
+```
+
+- Remediation: stop the conflicting process (use the PID from ss/lsof) or start uvicorn on a different port:
+
+```bash
+uvicorn app.main:app --host 127.0.0.1 --port 8001
+```
+
+VM file permission and environment notes
+
+- Recommended file ownership for a single-VM deployment: the application process user (e.g. todoo or www-data). Use chown to set it:
+
+```bash
+sudo chown todoo:todoo "<PATH>"
+```
+
+- Recommended permission modes: directories 0755, files 0640 (or 0644 if other users need read access).
+
+- To print the path the running process will use from code:
+
+```bash
+python -c "from app.persistence import get_data_file_path; print(get_data_file_path())"
+```
+
+If you still have issues, check persistence/README.md for more details about the JSON store and how the code resolves the path.
 
 If the run artifact referenced by other tasks exists, follow that project's run command instead.
 
