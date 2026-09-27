@@ -9,16 +9,16 @@ Location and path pattern
 -------------------------
 
 The runtime path for the JSON store is resolved from the environment variable
-TODOO_DATA_FILE. Example patterns:
+TODOS_JSON_PATH. Example patterns:
 
 - Single file inside application data directory: /var/lib/todoo/todos.json
 - Per-tenant files: /var/lib/todoo/store/<tenant-id>.json
 - Local development default: ./data/todoo.json
 
-The code scaffold in app/persistence.py resolves TODOO_DATA_FILE and falls
-back to ./data/todoo.json when the variable is not set. Production deployments
-should set TODOO_DATA_FILE to a directory on the VM with appropriate
-permissions and durability characteristics.
+The code scaffold in app/persistence.py resolves TODOS_JSON_PATH and falls
+back to ./data/todoo.json when the variable is not set. Production
+deployments should set TODOS_JSON_PATH to a directory on the VM with
+appropriate permissions and durability characteristics.
 
 Permissions and access
 ----------------------
@@ -64,7 +64,7 @@ jobs that invoke the harness to perform latency gating in the future.
 Environment variables
 ---------------------
 
-- TODOO_DATA_FILE - Absolute or relative path to the JSON persistence file.
+- TODOS_JSON_PATH - Absolute or relative path to the JSON persistence file.
   Example: /var/lib/todoo/todos.json
 - SECRET_KEY - Application secret (used by the app; not directly persistence
   related but documented here for convenience).
@@ -109,8 +109,34 @@ chmod 0755 "$(dirname <path>)"
 To create an initial empty store with safe permissions:
 
 ```bash
-python -c "from app.persistence import save_store; save_store([])"
+python -c "from app.persistence import save_store; save_store({'todos': []})"
 chmod 0640 <path> || true
+```
+
+Example foreground startup
+--------------------------
+
+The tests and local development can run the FastAPI application in the
+foreground without uvicorn using a simple Python module invocation. Set the
+TODOS_JSON_PATH environment variable and run the module. The module supports
+optional --host and --port flags; when omitted it defaults to --host 127.0.0.1
+and --port 8000 (the defaults the test harness expects).
+
+```bash
+# Example: run in foreground binding to localhost:8000 (default test host/port)
+TODOS_JSON_PATH=/tmp/todos.json python -m app --host 127.0.0.1 --port 8000
+
+# Equivalent explicit module path calling the package initializer:
+TODOS_JSON_PATH=/tmp/todos.json python -m app.__init__ --host 127.0.0.1 --port 8000
+
+# You can also bind to all interfaces if desired:
+# TODOS_JSON_PATH=/tmp/todos.json python -m app --host 0.0.0.0 --port 8000
+```
+
+Alternatively, use uvicorn as documented in the repository README if available:
+
+```bash
+TODOS_JSON_PATH=/tmp/todos.json uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
 Cross-reference: see the repository README 'Local development' troubleshooting
