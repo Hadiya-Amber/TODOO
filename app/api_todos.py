@@ -49,34 +49,75 @@ def get_todos() -> List[Dict[str, Any]]:
 @router.post("", response_model=TodoOut, status_code=status.HTTP_201_CREATED)
 def post_todo(item: TodoIn) -> Dict[str, Any]:
     """Create a new todo from the request body."""
+    from instrumentation.latency_placeholder import record_latency
+    import time
+
+    start = time.time()
     payload = {k: v for k, v in item.dict().items() if v is not None}
-    return _create_todo(payload)
+    try:
+        return _create_todo(payload)
+    finally:
+        elapsed = time.time() - start
+        try:
+            record_latency("create", elapsed, extra={"label": payload.get("label")})
+        except Exception:
+            # Do not let instrumentation failures affect API behaviour
+            pass
 
 
 @router.put("/{todo_id}", response_model=TodoOut)
 def put_todo(todo_id: int, item: TodoIn) -> Dict[str, Any]:
     """Update/replace fields of an existing todo."""
+    from instrumentation.latency_placeholder import record_latency
+    import time
+
+    start = time.time()
     payload = {k: v for k, v in item.dict().items() if v is not None}
     try:
         return _update_todo(todo_id, payload)
     except HTTPException as exc:
-        # re-raise to keep FastAPI's behaviour and status codes
         raise exc
+    finally:
+        elapsed = time.time() - start
+        try:
+            record_latency("edit", elapsed, extra={"id": todo_id})
+        except Exception:
+            pass
 
 
 @router.patch("/{todo_id}/toggle", response_model=TodoOut)
 def patch_toggle(todo_id: int) -> Dict[str, Any]:
     """Toggle the done state of a todo."""
+    from instrumentation.latency_placeholder import record_latency
+    import time
+
+    start = time.time()
     try:
         return _toggle_todo(todo_id)
     except HTTPException as exc:
         raise exc
+    finally:
+        elapsed = time.time() - start
+        try:
+            record_latency("toggle", elapsed, extra={"id": todo_id})
+        except Exception:
+            pass
 
 
 @router.delete("/{todo_id}")
 def delete(todo_id: int) -> Dict[str, int]:
     """Delete a todo by id and return a confirmation JSON object."""
+    from instrumentation.latency_placeholder import record_latency
+    import time
+
+    start = time.time()
     try:
         return _delete_todo(todo_id)
     except HTTPException as exc:
         raise exc
+    finally:
+        elapsed = time.time() - start
+        try:
+            record_latency("delete", elapsed, extra={"id": todo_id})
+        except Exception:
+            pass
